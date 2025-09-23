@@ -9,13 +9,6 @@ import re
 from datalib import Data, flag_to_species
 from datalib_logsph import DataSph
 
-def rho2(a, r, th):
-  return r * r + (a * np.cos(th))**2
-
-def sqrt_gamma(a, r, th):
-  r2 = rho2(a, r, th)
-  return r2 * np.sin(th) * np.sqrt(1.0 + 2.0 * r / r2)
-
 def Sigma(r,th,a):
   return r**2+a**2*np.cos(th)**2
 def Delta(r,a):
@@ -117,20 +110,58 @@ for i in range(4):
                 else:
                     levi_civita4[i, j, k, l] = -1
 
+def reduce_by_tiles_reduceat(arr, tile_size):
+    N = arr.shape[0]
+    # Sum along rows first
+    row_sums = np.add.reduceat(arr, np.arange(0, N, tile_size), axis=0)
+    # Then sum along columns
+    return np.add.reduceat(row_sums, np.arange(0, N, tile_size), axis=1)
+
 
 class DataKerrSchild(DataSph):
   _mesh_loaded = False
   _metric_ready = False
 
-  def __init__(self, path):
+  def __init__(self, path, tile_size=4):
     super().__init__(path)
     self.a = self._conf["bh_spin"]
     self.rH = rs_o(self.a)
-    self.extra_fld_keys = ["fluxB", "Dd1", "Dd2", "Dd3", "D", "Bd1", "Bd2", "Bd3", "B", "Ed1", "Ed2", "Ed3", "Hd1", "Hd2", "Hd3", "sigma", "flux_upper",
-                           "flux_lower", "n_proper", "fluid_u_upper", "fluid_u_lower", "fluid_b_upper", "stress_e", "stress_p", "frf_transform", 
-                           "frf_T_munu", "plasma_temp", "pressure_para", "pressure_perp", "plasma_beta", "frf_B"]
+    self.extra_fld_keys = ["fluxB", "Dd1", "Dd2", "Dd3", "D", "Bd1", "Bd2", "Bd3", "B", 
+                           "Ed1", "Ed2", "Ed3", "Hd1", "Hd2", "Hd3",
+                           "sigma", "flux_upper", "flux_lower", "n_proper", 
+                           "fluid_u_upper", "fluid_u_lower", "fluid_b_upper", 
+                           "stress_e", "stress_p", "frf_transform", "frf_transform_inv", "frf_T_munu",
+                           "plasma_temp", "pressure_para", "pressure_perp", "plasma_beta", "frf_B",
+                           "stress_reduced", "flux_upper_reduced", "flux_lower_reduced", "n_proper_reduced",
+                           "fluid_u_upper_reduced", "fluid_u_lower_reduced", "fluid_b_upper_reduced"]
+    self.tile_size = tile_size
+    self.reduced_shape = (self.x1.shape[0] // tile_size, self.x1.shape[1] // tile_size)
+    self._rs_reduced = np.exp(
+      np.linspace(
+        0,
+        self._conf["size"][0],
+        self._conf["N"][0]
+        // self._conf["downsample"] // self.tile_size,
+      ) + self._conf["lower"][0]
+    )
+    self._ths_reduced = np.linspace(
+          0,
+          self._conf["size"][1],
+          self._conf["N"][1] // self._conf["downsample"] // self.tile_size,
+        ) + self._conf["lower"][1]
+
+    self._rv_reduced, self._thv_reduced = np.meshgrid(self._rs_reduced, self._ths_reduced)
+    self.x1_reduced = self._rv_reduced * np.sin(self._thv_reduced)
+    self.x2_reduced = self._rv_reduced * np.cos(self._thv_reduced)
     self.compute_metrics()
     self.reload()
+
+
+  def save_diagnostics(self, name, array):
+    path = os.path.join(self._path, f"diagnostics.{self._current_fld_step:05d}.h5")
+    with h5py.File(path, "a") as f:
+      if not name in f:
+        f[name] = array
 
   def compute_metrics(self):
     if self._metric_ready:
@@ -153,6 +184,27 @@ class DataKerrSchild(DataSph):
     self.g_lower[:, :, 2, 2] = gd22(self._rv, self._thetav, self.a)
     self.g_lower[:, :, 3, 3] = gd33(self._rv, self._thetav, self.a)
     self.g_lower[:, :, 1, 3] = self.g_lower[:, :, 3, 1] = gd13(self._rv, self._thetav, self.a)
+
+    self.g_upper_reduced = np.zeros((self.reduced_shape[0], self.reduced_shape[1], 4, 4))
+    self.g_lower_reduced = np.zeros((self.reduced_shape[0], self.reduced_shape[1], 4, 4))
+
+    self.g_upper_reduced[:, :, 0, 0] = gu00(self._rv_reduced, self._thv_reduced, self.a)
+    self.g_upper_reduced[:, :, 0, 1] = self.g_upper_reduced[:, :, 1, 0] = gu01(self._rv_reduced, self._thv_reduced, self.a)
+    self.g_upper_reduced[:, :, 1, 1] = gu11(self._rv_reduced, self._thv_reduced, self.a)
+    self.g_upper_reduced[:, :, 2, 2] = gu22(self._rv_reduced, self._thv_reduced, self.a)
+    self.g_upper_reduced[:, :, 3, 3] = gu33(self._rv_reduced, self._thv_reduced, self.a)
+    self.g_upper_reduced[:, :, 1, 3] = self.g_upper_reduced[:, :, 3, 1] = gu13(self._rv_reduced, self._thv_reduced, self.a)
+
+    self.g_lower_reduced[:, :, 0, 0] = gd00(self._rv_reduced, self._thv_reduced, self.a)
+    self.g_lower_reduced[:, :, 0, 1] = self.g_lower_reduced[:, :, 1, 0] = gd01(self._rv_reduced, self._thv_reduced, self.a)
+    self.g_lower_reduced[:, :, 0, 3] = self.g_lower_reduced[:, :, 3, 0] = gd03(self._rv_reduced, self._thv_reduced, self.a)
+    self.g_lower_reduced[:, :, 1, 1] = gd11(self._rv_reduced, self._thv_reduced, self.a)
+    self.g_lower_reduced[:, :, 2, 2] = gd22(self._rv_reduced, self._thv_reduced, self.a)
+    self.g_lower_reduced[:, :, 3, 3] = gd33(self._rv_reduced, self._thv_reduced, self.a)
+    self.g_lower_reduced[:, :, 1, 3] = self.g_lower_reduced[:, :, 3, 1] = gd13(self._rv_reduced, self._thv_reduced, self.a)
+
+    self.sqrt_g = gsqrt(self._rv, self._thetav, self.a)
+    self.sqrt_g_reduced = gsqrt(self._rv_reduced, self._thv_reduced, self.a)
     self._metric_ready = True
 
   def raise_4d_vec(self, vec_lower):
@@ -166,13 +218,23 @@ class DataKerrSchild(DataSph):
     return np.einsum("ijab,ijb->ija", self.g_lower, vec_upper)
   
   def dot_4d(self, vec_upper, vec_lower):
-    return np.einsum("ija, ijb->ij", vec_upper, vec_lower)
+    return np.einsum("ija, ija->ij", vec_upper, vec_lower)
+
+  def inner_product_4d_contravariant(self, vec1, vec2):
+    if not self._metric_ready:
+      self.compute_metrics()
+    return np.einsum("ijab,ija,ijb->ij", self.g_lower, vec1, vec2)
+
+  def inner_product_4d_covariant(self, vec1, vec2):
+    if not self._metric_ready:
+      self.compute_metrics()
+    return np.einsum("ijab,ija,ijb->ij", self.g_upper, vec1, vec2)
 
   def _load_fld_quantity(self, key):
     path = os.path.join(self._path, f"fld.{self._current_fld_step:05d}.h5")
     if key == "fluxB":
       self._load_sph_mesh()
-      self.__dict__[key] = np.cumsum(self.B1 * sqrt_gamma(self.a, self._rv, self._thetav) * self._dtheta, axis=0)
+      self.__dict__[key] = np.cumsum(self.B1 * gmsqrt(self._rv, self._thetav, self.a) * self._dtheta, axis=0)
     # Lower components of D
     elif key == "Dd1":
       self.__dict__[key] = gmd11(self._rv, self._thetav, self.a) * self.E1 + gmd13(self._rv, self._thetav, self.a) * self.E3
@@ -181,7 +243,7 @@ class DataKerrSchild(DataSph):
     elif key == "Dd3":
       self.__dict__[key] = gmd13(self._rv, self._thetav, self.a) * self.E1 + gmd33(self._rv, self._thetav, self.a) * self.E3
     elif key == "D":
-      self.__dict__[key] = np.sqrt(self.Dd1 * self.Dd1 + self.Dd2 * self.Dd2 + self.Dd3 * self.Dd3)
+      self.__dict__[key] = np.sqrt(self.E1 * self.Dd1 + self.E2 * self.Dd2 + self.E3 * self.Dd3)
     # Lower components of B
     elif key == "Bd1":
       self.__dict__[key] = gmd11(self._rv, self._thetav, self.a) * self.B1 + gmd13(self._rv, self._thetav, self.a) * self.B3
@@ -205,8 +267,10 @@ class DataKerrSchild(DataSph):
       self.__dict__[key] = alpha(self._rv, self._thetav, self.a) * self.Bd2 + gmsqrt(self._rv, self._thetav, self.a) * beta1u(self._rv, self._thetav, self.a) * self.E3
     elif key == "Hd3":
       self.__dict__[key] = alpha(self._rv, self._thetav, self.a) * self.Bd3 - gmsqrt(self._rv, self._thetav, self.a) * beta1u(self._rv, self._thetav, self.a) * self.E2
-    elif key == "sigma": # this is the cold sigma, computed in the KerrSchild coordinate frame
-      self.__dict__[key] = self.B**2 / (self.Rho_p - self.Rho_e + 1e-6)
+    elif key == "sigma": # this is the cold sigma, computed in the FRF
+      # self.__dict__[key] = self.B**2 / (self.Rho_p - self.Rho_e + 1e-6)
+      b2 = self.inner_product_4d_contravariant(self.frf_B, self.frf_B)
+      self.__dict__[key] = b2 / self.n_proper
     elif key == "flux_upper":
       self.__dict__[key] = self.raise_4d_vec(self.flux_lower)
     elif key == "flux_lower":
@@ -240,7 +304,8 @@ class DataKerrSchild(DataSph):
       # b_upper = np.array([b0, b1, b2, b3])
       self.__dict__[key] = np.stack([b0, b1, b2, b3], axis=-1)
     elif key == "fluid_b_upper":
-      bnorm = np.sqrt(inner_product_4d_contravariant(self.frf_B, self.frf_B, self._rv, self._thetav, self.a))
+      bnorm = np.sqrt(self.inner_product_4d_contravariant(self.frf_B, self.frf_B))
+      # bnorm = np.sqrt(inner_product_4d_contravariant(self.frf_B, self.frf_B, self._rv, self._thetav, self.a))
       self.__dict__[key] = self.frf_B / bnorm[..., np.newaxis]
     elif key == "stress_e":
       stress_e = np.zeros((self.x1.shape[0], self.x1.shape[1], 4, 4))
@@ -280,23 +345,70 @@ class DataKerrSchild(DataSph):
       #                     ], axis=-1)  # shape: (4, 4, grid_y, grid_x)
       # stress_p = np.moveaxis(stress_p, 0, -2)  # shape: (grid_y, grid_x, 4, 4)
       self.__dict__[key] = stress_p
+    elif key == "stress_reduced":
+      stress = (self.stress_e + self.stress_p) * self.sqrt_g[..., np.newaxis, np.newaxis]
+      stress_reduced = reduce_by_tiles_reduceat(stress, self.tile_size) / self.sqrt_g_reduced[..., np.newaxis, np.newaxis] / self.tile_size**2
+      self.__dict__[key] = stress_reduced
+    elif key == "flux_lower_reduced":
+      flux = self.flux_lower * self.sqrt_g[..., np.newaxis]
+      flux_reduced = reduce_by_tiles_reduceat(flux, self.tile_size) / self.sqrt_g_reduced[..., np.newaxis] / self.tile_size**2
+      self.__dict__[key] = flux_reduced
+    elif key == "flux_upper_reduced":
+      self.__dict__[key] = np.einsum('ijab,ijb->ija', self.g_upper_reduced, self.flux_lower_reduced)
+    elif key == "n_proper_reduced":
+      self.__dict__[key] = np.sqrt(np.abs(self.dot_4d(self.flux_upper_reduced, self.flux_lower_reduced)))
     elif key == "frf_transform":
       t_vec = np.array([0, 1, 0, 0])
       e2_vec = np.einsum('abcd,ijb,ijc,d->ija', levi_civita4, self.fluid_u_upper, self.fluid_b_upper, t_vec)
       e2_vec = raise_4d_vec(e2_vec, self._rv, self._thetav, self.a)
-      e2_vec /= np.sqrt(np.abs(inner_product_4d_contravariant(e2_vec, e2_vec, self._rv, self._thetav, self.a)))[..., np.newaxis]
+      e2_vec /= np.sqrt(np.abs(self.inner_product_4d_contravariant(e2_vec, e2_vec)))[..., np.newaxis]
+      # e2_vec /= np.sqrt(np.abs(inner_product_4d_contravariant(e2_vec, e2_vec, self._rv, self._thetav, self.a)))[..., np.newaxis]
       e3_vec = np.einsum('abcd,ijb,ijc,ijd->ija', levi_civita4, self.fluid_u_upper, self.fluid_b_upper, e2_vec)
       e3_vec = raise_4d_vec(e3_vec, self._rv, self._thetav, self.a)
-      e3_vec /= np.sqrt(np.abs(inner_product_4d_contravariant(e3_vec, e3_vec, self._rv, self._thetav, self.a)))[..., np.newaxis]
-      Rs = np.stack([
-          [self.fluid_u_upper[...,0], e2_vec[...,0], e3_vec[...,0], self.fluid_b_upper[...,0]],
-          [self.fluid_u_upper[...,1], e2_vec[...,1], e3_vec[...,1], self.fluid_b_upper[...,1]],
-          [self.fluid_u_upper[...,2], e2_vec[...,2], e3_vec[...,2], self.fluid_b_upper[...,2]],
-          [self.fluid_u_upper[...,3], e2_vec[...,3], e3_vec[...,3], self.fluid_b_upper[...,3]],
-      ], axis=-1) # shape: (4, grid_y, grid_x, 4)
-      Rs = np.moveaxis(Rs, 0, -2)  # shape: (grid_y, grid_x, 4, 4)
-      Rs = np.moveaxis(Rs, -2, -1)  # shape: (grid_y, grid_x, 4, 4)
+      e3_vec /= np.sqrt(np.abs(self.inner_product_4d_contravariant(e3_vec, e3_vec)))[..., np.newaxis]
+      # e3_vec /= np.sqrt(np.abs(inner_product_4d_contravariant(e3_vec, e3_vec, self._rv, self._thetav, self.a)))[..., np.newaxis]
+      Rs = np.zeros((self.x1.shape[0], self.x1.shape[1], 4, 4))
+      # This is dx/dx_hat
+      Rs[:, :, 0, 0] = self.fluid_u_upper[..., 0]
+      Rs[:, :, 0, 1] = e2_vec[..., 0]
+      Rs[:, :, 0, 2] = e3_vec[..., 0]
+      Rs[:, :, 0, 3] = self.fluid_b_upper[..., 0]
+      Rs[:, :, 1, 0] = self.fluid_u_upper[..., 1]
+      Rs[:, :, 1, 1] = e2_vec[..., 1]
+      Rs[:, :, 1, 2] = e3_vec[..., 1]
+      Rs[:, :, 1, 3] = self.fluid_b_upper[..., 1]
+      Rs[:, :, 2, 0] = self.fluid_u_upper[..., 2]
+      Rs[:, :, 2, 1] = e2_vec[..., 2]
+      Rs[:, :, 2, 2] = e3_vec[..., 2]
+      Rs[:, :, 2, 3] = self.fluid_b_upper[..., 2]
+      Rs[:, :, 3, 0] = self.fluid_u_upper[..., 3]
+      Rs[:, :, 3, 1] = e2_vec[..., 3]
+      Rs[:, :, 3, 2] = e3_vec[..., 3]
+      Rs[:, :, 3, 3] = self.fluid_b_upper[..., 3]
       self.__dict__[key] = Rs
+    elif key == "frf_transform_inv":
+      fluid_b_lower = self.lower_4d_vec(self.fluid_b_upper)
+      e2_vec_lower = self.lower_4d_vec(self.frf_transform[:, :, :, 1])
+      e3_vec_lower = self.lower_4d_vec(self.frf_transform[:, :, :, 2])
+      Rs_inv = np.zeros((self.x1.shape[0], self.x1.shape[1], 4, 4))
+      # This is dx_hat/dx
+      Rs_inv[:, :, 0, 0] = self.fluid_u_lower[..., 0]
+      Rs_inv[:, :, 0, 1] = self.fluid_u_lower[..., 1]
+      Rs_inv[:, :, 0, 2] = self.fluid_u_lower[..., 2]
+      Rs_inv[:, :, 0, 3] = self.fluid_u_lower[..., 3]
+      Rs_inv[:, :, 1, 0] = e2_vec_lower[..., 0]
+      Rs_inv[:, :, 1, 1] = e2_vec_lower[..., 1]
+      Rs_inv[:, :, 1, 2] = e2_vec_lower[..., 2]
+      Rs_inv[:, :, 1, 3] = e2_vec_lower[..., 3]
+      Rs_inv[:, :, 2, 0] = e3_vec_lower[..., 0]
+      Rs_inv[:, :, 2, 1] = e3_vec_lower[..., 1]
+      Rs_inv[:, :, 2, 2] = e3_vec_lower[..., 2]
+      Rs_inv[:, :, 2, 3] = e3_vec_lower[..., 3]
+      Rs_inv[:, :, 3, 0] = fluid_b_lower[..., 0]
+      Rs_inv[:, :, 3, 1] = fluid_b_lower[..., 1]
+      Rs_inv[:, :, 3, 2] = fluid_b_lower[..., 2]
+      Rs_inv[:, :, 3, 3] = fluid_b_lower[..., 3]
+      self.__dict__[key] = Rs_inv
     elif key == "frf_T_munu":
       T_munu = self.stress_e + self.stress_p
       T_munu_frf = np.einsum('...ki,...lj,...kl->...ij', self.frf_transform, self.frf_transform, T_munu)
@@ -311,7 +423,8 @@ class DataKerrSchild(DataSph):
     elif key == "pressure_perp":
       self.__dict__[key] = (self.frf_T_munu[:, :, 1, 1] + self.frf_T_munu[:, :, 2, 2]) / 2.0
     elif key == "plasma_beta":
-      self.__dict__[key] = self.plasma_temp * self.n_proper / (0.5 * inner_product_4d_contravariant(self.frf_B, self.frf_B, self._rv, self._thetav, self.a) + 1e-6)
+      self.__dict__[key] = self.plasma_temp * self.n_proper / (0.5 * self.inner_product_4d_contravariant(self.frf_B, self.frf_B) + 1e-6)
+      # self.__dict__[key] = self.plasma_temp * self.n_proper / (0.5 * inner_product_4d_contravariant(self.frf_B, self.frf_B, self._rv, self._thetav, self.a) + 1e-6)
     # elif key
     # elif key == "J":
     #   self._J = np.sqrt(self.J1 * self.J1 + self.J2 * self.J2 + self.J3 * self.J3)
@@ -404,6 +517,30 @@ def inner_product_4d_covariant(v1, v2, r, th, a):
           2 * g13 * v1[...,1] * v2[...,3] +
           g22 * v1[...,2] * v2[...,2] +
           g33 * v1[...,3] * v2[...,3])
+
+# Inner product of two 3d contravariant vectors
+def inner_product_3d_contravariant(v1, v2, r, th, a):
+  g11 = gmd11(r, th, a)
+  g13 = gmd13(r, th, a)
+  g22 = gmd22(r, th, a)
+  g33 = gmd33(r, th, a)
+  return (g11 * v1[...,0] * v2[...,0] +
+          g22 * v1[...,1] * v2[...,1] +
+          g33 * v1[...,2] * v2[...,2]
+          + 2.0 * g13 * v1[...,0] * v2[...,2]
+         )
+
+# Inner product of two 3d covariant vectors
+def inner_product_3d_covariant(v1, v2, r, th, a):
+  g11 = gmu11(r, th, a)
+  g13 = gmu13(r, th, a)
+  g22 = gmu22(r, th, a)
+  g33 = gmu33(r, th, a)
+  return (g11 * v1[...,0] * v2[...,0] +
+          g22 * v1[...,1] * v2[...,1] +
+          g33 * v1[...,2] * v2[...,2]
+          + 2.0 * g13 * v1[...,0] * v2[...,2]
+         )
 
 # Raise a 4d covariant vector to a contravariant vector 
 def raise_4d_vec(v, r, th, a):
