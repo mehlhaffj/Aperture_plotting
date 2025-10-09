@@ -663,38 +663,38 @@ def calc_Tmunu_em(data):
     DdotE = Dru*Erd + Dthu*Ethd + Dphu*Ephd
     BdotH = Bru*Hrd + Bthu*Hthd + Bphu*Hphd
 
-    alpha = ks.alpha(data._rv, data._thetav, data.a)
-    sgam  = ks.gmsqrt(data._rv, data._thetav, data.a)
+    alph = alpha(data._rv, data._thetav, data.a)
+    sgam  = gmsqrt(data._rv, data._thetav, data.a)
 
     Tmuunud = np.zeros( (Dru.shape[0], Dru.shape[1], 4, 4) )
 
     # Use the formulae in Komissarov 2004, MNRAS 350 427
     # T^t_t
-    Tmuunud[:,:,0,0] = -1/(2*alpha) * (DdotE + BdotH)
+    Tmuunud[:,:,0,0] = -1/(2*alph) * (DdotE + BdotH)
 
     # T^i_t
     ixnz = np.where(sgam > 0.0)
-    Tmuunud[:,:,1,0][ixnz] = -1.0/(sgam*alpha)[ixnz] * (Ethd*Hphd - Ephd*Hthd)[ixnz]
-    Tmuunud[:,:,2,0][ixnz] =  1.0/(sgam*alpha)[ixnz] * (Erd *Hphd - Ephd*Hrd )[ixnz]
-    Tmuunud[:,:,3,0][ixnz] = -1.0/(sgam*alpha)[ixnz] * (Erd *Hthd - Ethd*Hrd )[ixnz]
+    Tmuunud[:,:,1,0][ixnz] = -1.0/(sgam*alph)[ixnz] * (Ethd*Hphd - Ephd*Hthd)[ixnz]
+    Tmuunud[:,:,2,0][ixnz] =  1.0/(sgam*alph)[ixnz] * (Erd *Hphd - Ephd*Hrd )[ixnz]
+    Tmuunud[:,:,3,0][ixnz] = -1.0/(sgam*alph)[ixnz] * (Erd *Hthd - Ethd*Hrd )[ixnz]
 
     # T^t_i
-    Tmuunud[:,:,0,1] =  sgam/alpha * (Dthu*Bphu - Dphu*Bthu)
-    Tmuunud[:,:,0,2] = -sgam/alpha * (Dru *Bphu - Dphu*Bru)
-    Tmuunud[:,:,0,3] =  sgam/alpha * (Dru *Bthu - Dthu*Bru)
+    Tmuunud[:,:,0,1] =  sgam/alph * (Dthu*Bphu - Dphu*Bthu)
+    Tmuunud[:,:,0,2] = -sgam/alph * (Dru *Bphu - Dphu*Bru)
+    Tmuunud[:,:,0,3] =  sgam/alph * (Dru *Bthu - Dthu*Bru)
 
     # T^i_j
     # Diagonal terms
-    Tmuunud[:,:,1,1] = -1.0/alpha * (Dru *Erd  + Bru *Hrd ) - Tmuunud[:,:,0,0]
-    Tmuunud[:,:,2,2] = -1.0/alpha * (Dthu*Ethd + Bthu*Hthd) - Tmuunud[:,:,0,0]
-    Tmuunud[:,:,3,3] = -1.0/alpha * (Dphu*Ephd + Bphu*Hphd) - Tmuunud[:,:,0,0]
+    Tmuunud[:,:,1,1] = -1.0/alph * (Dru *Erd  + Bru *Hrd ) - Tmuunud[:,:,0,0]
+    Tmuunud[:,:,2,2] = -1.0/alph * (Dthu*Ethd + Bthu*Hthd) - Tmuunud[:,:,0,0]
+    Tmuunud[:,:,3,3] = -1.0/alph * (Dphu*Ephd + Bphu*Hphd) - Tmuunud[:,:,0,0]
     # Off-diagonal terms
-    Tmuunud[:,:,1,2] = -1.0/alpha * (Dru *Ethd + Bru *Hthd)
-    Tmuunud[:,:,1,3] = -1.0/alpha * (Dru *Ephd + Bru *Hphd)
-    Tmuunud[:,:,2,3] = -1.0/alpha * (Dthu*Ephd + Bthu*Hphd)
-    Tmuunud[:,:,2,1] = -1.0/alpha * (Dthu*Erd  + Bthu*Hrd )
-    Tmuunud[:,:,3,1] = -1.0/alpha * (Dphu*Erd  + Bphu*Hrd )
-    Tmuunud[:,:,3,2] = -1.0/alpha * (Dphu*Ethd + Bphu*Hthd)
+    Tmuunud[:,:,1,2] = -1.0/alph * (Dru *Ethd + Bru *Hthd)
+    Tmuunud[:,:,1,3] = -1.0/alph * (Dru *Ephd + Bru *Hphd)
+    Tmuunud[:,:,2,3] = -1.0/alph * (Dthu*Ephd + Bthu*Hphd)
+    Tmuunud[:,:,2,1] = -1.0/alph * (Dthu*Erd  + Bthu*Hrd )
+    Tmuunud[:,:,3,1] = -1.0/alph * (Dphu*Erd  + Bphu*Hrd )
+    Tmuunud[:,:,3,2] = -1.0/alph * (Dphu*Ethd + Bphu*Hthd)
 
     return Tmuunud
 
