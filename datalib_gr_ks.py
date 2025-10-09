@@ -118,6 +118,11 @@ def reduce_by_tiles_reduceat(arr, tile_size):
     # Then sum along columns
     return np.add.reduceat(row_sums, np.arange(0, N2, tile_size), axis=1)
 
+# At the axis, 1/sin(theta) -> NaN
+# This causes the metric to introduce NaNs into several arrays below
+# To avoid propagation of these NaNs in other analysis calculations, we zero them out
+def replace_nan_with_zero(a):
+    return np.where(np.isnan(a), np.zeros(a.shape), a)
 
 class DataKerrSchild(DataSph):
   _mesh_loaded = False
@@ -277,7 +282,9 @@ class DataKerrSchild(DataSph):
       b2 = self.inner_product_4d_contravariant(self.frf_B, self.frf_B)
       self.__dict__[key] = b2 / self.n_proper
     elif key == "flux_upper":
-      self.__dict__[key] = self.raise_4d_vec(self.flux_lower)
+      flux_upper = self.raise_4d_vec(self.flux_lower)
+      flux_upper = replace_nan_with_zero(flux_upper)
+      self.__dict__[key] = flux_upper # self.raise_4d_vec(self.flux_lower)
     elif key == "flux_lower":
       self.__dict__[key] = np.stack([self.num_e + self.num_p, self.flux_e1 + self.flux_p1,
                                      self.flux_e2 + self.flux_p2, self.flux_e3 + self.flux_p3], axis=-1)
@@ -306,6 +313,10 @@ class DataKerrSchild(DataSph):
       b1 = -u_lower[...,0] * B[...,1] / alpha_val - (u_lower[...,2] * E[...,3] - u_lower[...,3] * E[...,2]) / alpha_val / sqrt_gm
       b2 = -u_lower[...,0] * B[...,2] / alpha_val - (u_lower[...,3] * E[...,1] - u_lower[...,1] * E[...,3]) / alpha_val / sqrt_gm
       b3 = -u_lower[...,0] * B[...,3] / alpha_val - (u_lower[...,1] * E[...,2] - u_lower[...,2] * E[...,1]) / alpha_val / sqrt_gm
+      b0 = replace_nan_with_zero(b0)
+      b1 = replace_nan_with_zero(b1)
+      b2 = replace_nan_with_zero(b2)
+      b3 = replace_nan_with_zero(b3)
       # b_upper = np.array([b0, b1, b2, b3])
       self.__dict__[key] = np.stack([b0, b1, b2, b3], axis=-1)
     elif key == "frf_B_reduced":
@@ -325,10 +336,15 @@ class DataKerrSchild(DataSph):
     elif key == "fluid_b_upper":
       bnorm = np.sqrt(self.inner_product_4d_contravariant(self.frf_B, self.frf_B))
       # bnorm = np.sqrt(inner_product_4d_contravariant(self.frf_B, self.frf_B, self._rv, self._thetav, self.a))
-      self.__dict__[key] = self.frf_B / bnorm[..., np.newaxis]
+      # self.__dict__[key] = self.frf_B / bnorm[..., np.newaxis]
+      b_upper = self.frf_B / bnorm[..., np.newaxis]
+      b_upper = replace_nan_with_zero(b_upper)
+      self.__dict__[key] = b_upper
     elif key == "fluid_b_upper_reduced":
       bnorm = np.sqrt(np.einsum("ijab,ija,ijb->ij", self.g_lower_reduced, self.frf_B_reduced, self.frf_B_reduced))
-      self.__dict__[key] = self.frf_B_reduced / bnorm[..., np.newaxis]
+      b_upper_reduced = self.frf_B_reduced / bnorm[..., np.newaxis]
+      b_upper_reduced = replace_nan_with_zero(b_upper_reduced)
+      self.__dict__[key] = b_upper_reduced
     elif key == "stress_e":
       stress_e = np.zeros((self.x1.shape[0], self.x1.shape[1], 4, 4))
       stress_e[:, :, 0, 0] = self.stress_e00
@@ -697,5 +713,4 @@ def calc_Tmunu_em(data):
     Tmuunud[:,:,3,2] = -1.0/alph * (Dphu*Ethd + Bphu*Hthd)
 
     return Tmuunud
-
 
