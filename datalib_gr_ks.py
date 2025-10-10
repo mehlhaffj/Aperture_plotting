@@ -118,6 +118,13 @@ def reduce_by_tiles_reduceat(arr, tile_size):
     # Then sum along columns
     return np.add.reduceat(row_sums, np.arange(0, N2, tile_size), axis=1)
 
+# At the axis, 1/sin(theta) -> NaN
+# This causes the metric to introduce NaNs into several arrays below
+# To avoid propagation of these NaNs in other analysis calculations, we zero them out
+# Update: I have found a couple of instances where a +/- inf is produced instead.
+#   I've updated the function to zero these elements as well
+def replace_naninf_with_zero(a):
+    return np.where(np.isnan(a) | np.isinf(a), np.zeros(a.shape), a)
 
 class DataKerrSchild(DataSph):
   _mesh_loaded = False
@@ -277,7 +284,9 @@ class DataKerrSchild(DataSph):
       b2 = self.inner_product_4d_contravariant(self.frf_B, self.frf_B)
       self.__dict__[key] = b2 / self.n_proper
     elif key == "flux_upper":
-      self.__dict__[key] = self.raise_4d_vec(self.flux_lower)
+      flux_upper = self.raise_4d_vec(self.flux_lower)
+      flux_upper = replace_naninf_with_zero(flux_upper)
+      self.__dict__[key] = flux_upper # self.raise_4d_vec(self.flux_lower)
     elif key == "flux_lower":
       self.__dict__[key] = np.stack([self.num_e + self.num_p, self.flux_e1 + self.flux_p1,
                                      self.flux_e2 + self.flux_p2, self.flux_e3 + self.flux_p3], axis=-1)
@@ -306,6 +315,10 @@ class DataKerrSchild(DataSph):
       b1 = -u_lower[...,0] * B[...,1] / alpha_val - (u_lower[...,2] * E[...,3] - u_lower[...,3] * E[...,2]) / alpha_val / sqrt_gm
       b2 = -u_lower[...,0] * B[...,2] / alpha_val - (u_lower[...,3] * E[...,1] - u_lower[...,1] * E[...,3]) / alpha_val / sqrt_gm
       b3 = -u_lower[...,0] * B[...,3] / alpha_val - (u_lower[...,1] * E[...,2] - u_lower[...,2] * E[...,1]) / alpha_val / sqrt_gm
+      b0 = replace_naninf_with_zero(b0)
+      b1 = replace_naninf_with_zero(b1)
+      b2 = replace_naninf_with_zero(b2)
+      b3 = replace_naninf_with_zero(b3)
       # b_upper = np.array([b0, b1, b2, b3])
       self.__dict__[key] = np.stack([b0, b1, b2, b3], axis=-1)
     elif key == "frf_B_reduced":
@@ -325,10 +338,15 @@ class DataKerrSchild(DataSph):
     elif key == "fluid_b_upper":
       bnorm = np.sqrt(self.inner_product_4d_contravariant(self.frf_B, self.frf_B))
       # bnorm = np.sqrt(inner_product_4d_contravariant(self.frf_B, self.frf_B, self._rv, self._thetav, self.a))
-      self.__dict__[key] = self.frf_B / bnorm[..., np.newaxis]
+      # self.__dict__[key] = self.frf_B / bnorm[..., np.newaxis]
+      b_upper = self.frf_B / bnorm[..., np.newaxis]
+      b_upper = replace_naninf_with_zero(b_upper)
+      self.__dict__[key] = b_upper
     elif key == "fluid_b_upper_reduced":
       bnorm = np.sqrt(np.einsum("ijab,ija,ijb->ij", self.g_lower_reduced, self.frf_B_reduced, self.frf_B_reduced))
-      self.__dict__[key] = self.frf_B_reduced / bnorm[..., np.newaxis]
+      b_upper_reduced = self.frf_B_reduced / bnorm[..., np.newaxis]
+      b_upper_reduced = replace_naninf_with_zero(b_upper_reduced)
+      self.__dict__[key] = b_upper_reduced
     elif key == "stress_e":
       stress_e = np.zeros((self.x1.shape[0], self.x1.shape[1], 4, 4))
       stress_e[:, :, 0, 0] = self.stress_e00
@@ -663,39 +681,38 @@ def calc_Tmunu_em(data):
     DdotE = Dru*Erd + Dthu*Ethd + Dphu*Ephd
     BdotH = Bru*Hrd + Bthu*Hthd + Bphu*Hphd
 
-    alpha = ks.alpha(data._rv, data._thetav, data.a)
-    sgam  = ks.gmsqrt(data._rv, data._thetav, data.a)
+    alph = alpha(data._rv, data._thetav, data.a)
+    sgam  = gmsqrt(data._rv, data._thetav, data.a)
 
     Tmuunud = np.zeros( (Dru.shape[0], Dru.shape[1], 4, 4) )
 
     # Use the formulae in Komissarov 2004, MNRAS 350 427
     # T^t_t
-    Tmuunud[:,:,0,0] = -1/(2*alpha) * (DdotE + BdotH)
+    Tmuunud[:,:,0,0] = -1/(2*alph) * (DdotE + BdotH)
 
     # T^i_t
     ixnz = np.where(sgam > 0.0)
-    Tmuunud[:,:,1,0][ixnz] = -1.0/(sgam*alpha)[ixnz] * (Ethd*Hphd - Ephd*Hthd)[ixnz]
-    Tmuunud[:,:,2,0][ixnz] =  1.0/(sgam*alpha)[ixnz] * (Erd *Hphd - Ephd*Hrd )[ixnz]
-    Tmuunud[:,:,3,0][ixnz] = -1.0/(sgam*alpha)[ixnz] * (Erd *Hthd - Ethd*Hrd )[ixnz]
+    Tmuunud[:,:,1,0][ixnz] = -1.0/(sgam*alph)[ixnz] * (Ethd*Hphd - Ephd*Hthd)[ixnz]
+    Tmuunud[:,:,2,0][ixnz] =  1.0/(sgam*alph)[ixnz] * (Erd *Hphd - Ephd*Hrd )[ixnz]
+    Tmuunud[:,:,3,0][ixnz] = -1.0/(sgam*alph)[ixnz] * (Erd *Hthd - Ethd*Hrd )[ixnz]
 
     # T^t_i
-    Tmuunud[:,:,0,1] =  sgam/alpha * (Dthu*Bphu - Dphu*Bthu)
-    Tmuunud[:,:,0,2] = -sgam/alpha * (Dru *Bphu - Dphu*Bru)
-    Tmuunud[:,:,0,3] =  sgam/alpha * (Dru *Bthu - Dthu*Bru)
+    Tmuunud[:,:,0,1] =  sgam/alph * (Dthu*Bphu - Dphu*Bthu)
+    Tmuunud[:,:,0,2] = -sgam/alph * (Dru *Bphu - Dphu*Bru)
+    Tmuunud[:,:,0,3] =  sgam/alph * (Dru *Bthu - Dthu*Bru)
 
     # T^i_j
     # Diagonal terms
-    Tmuunud[:,:,1,1] = -1.0/alpha * (Dru *Erd  + Bru *Hrd ) - Tmuunud[:,:,0,0]
-    Tmuunud[:,:,2,2] = -1.0/alpha * (Dthu*Ethd + Bthu*Hthd) - Tmuunud[:,:,0,0]
-    Tmuunud[:,:,3,3] = -1.0/alpha * (Dphu*Ephd + Bphu*Hphd) - Tmuunud[:,:,0,0]
+    Tmuunud[:,:,1,1] = -1.0/alph * (Dru *Erd  + Bru *Hrd ) - Tmuunud[:,:,0,0]
+    Tmuunud[:,:,2,2] = -1.0/alph * (Dthu*Ethd + Bthu*Hthd) - Tmuunud[:,:,0,0]
+    Tmuunud[:,:,3,3] = -1.0/alph * (Dphu*Ephd + Bphu*Hphd) - Tmuunud[:,:,0,0]
     # Off-diagonal terms
-    Tmuunud[:,:,1,2] = -1.0/alpha * (Dru *Ethd + Bru *Hthd)
-    Tmuunud[:,:,1,3] = -1.0/alpha * (Dru *Ephd + Bru *Hphd)
-    Tmuunud[:,:,2,3] = -1.0/alpha * (Dthu*Ephd + Bthu*Hphd)
-    Tmuunud[:,:,2,1] = -1.0/alpha * (Dthu*Erd  + Bthu*Hrd )
-    Tmuunud[:,:,3,1] = -1.0/alpha * (Dphu*Erd  + Bphu*Hrd )
-    Tmuunud[:,:,3,2] = -1.0/alpha * (Dphu*Ethd + Bphu*Hthd)
+    Tmuunud[:,:,1,2] = -1.0/alph * (Dru *Ethd + Bru *Hthd)
+    Tmuunud[:,:,1,3] = -1.0/alph * (Dru *Ephd + Bru *Hphd)
+    Tmuunud[:,:,2,3] = -1.0/alph * (Dthu*Ephd + Bthu*Hphd)
+    Tmuunud[:,:,2,1] = -1.0/alph * (Dthu*Erd  + Bthu*Hrd )
+    Tmuunud[:,:,3,1] = -1.0/alph * (Dphu*Erd  + Bphu*Hrd )
+    Tmuunud[:,:,3,2] = -1.0/alph * (Dphu*Ethd + Bphu*Hthd)
 
     return Tmuunud
-
 
