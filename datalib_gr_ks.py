@@ -121,8 +121,10 @@ def reduce_by_tiles_reduceat(arr, tile_size):
 # At the axis, 1/sin(theta) -> NaN
 # This causes the metric to introduce NaNs into several arrays below
 # To avoid propagation of these NaNs in other analysis calculations, we zero them out
-def replace_nan_with_zero(a):
-    return np.where(np.isnan(a), np.zeros(a.shape), a)
+# Update: I have found a couple of instances where a +/- inf is produced instead.
+#   I've updated the function to zero these elements as well
+def replace_naninf_with_zero(a):
+    return np.where(np.isnan(a) | np.isinf(a), np.zeros(a.shape), a)
 
 class DataKerrSchild(DataSph):
   _mesh_loaded = False
@@ -283,7 +285,7 @@ class DataKerrSchild(DataSph):
       self.__dict__[key] = b2 / self.n_proper
     elif key == "flux_upper":
       flux_upper = self.raise_4d_vec(self.flux_lower)
-      flux_upper = replace_nan_with_zero(flux_upper)
+      flux_upper = replace_naninf_with_zero(flux_upper)
       self.__dict__[key] = flux_upper # self.raise_4d_vec(self.flux_lower)
     elif key == "flux_lower":
       self.__dict__[key] = np.stack([self.num_e + self.num_p, self.flux_e1 + self.flux_p1,
@@ -313,10 +315,10 @@ class DataKerrSchild(DataSph):
       b1 = -u_lower[...,0] * B[...,1] / alpha_val - (u_lower[...,2] * E[...,3] - u_lower[...,3] * E[...,2]) / alpha_val / sqrt_gm
       b2 = -u_lower[...,0] * B[...,2] / alpha_val - (u_lower[...,3] * E[...,1] - u_lower[...,1] * E[...,3]) / alpha_val / sqrt_gm
       b3 = -u_lower[...,0] * B[...,3] / alpha_val - (u_lower[...,1] * E[...,2] - u_lower[...,2] * E[...,1]) / alpha_val / sqrt_gm
-      b0 = replace_nan_with_zero(b0)
-      b1 = replace_nan_with_zero(b1)
-      b2 = replace_nan_with_zero(b2)
-      b3 = replace_nan_with_zero(b3)
+      b0 = replace_naninf_with_zero(b0)
+      b1 = replace_naninf_with_zero(b1)
+      b2 = replace_naninf_with_zero(b2)
+      b3 = replace_naninf_with_zero(b3)
       # b_upper = np.array([b0, b1, b2, b3])
       self.__dict__[key] = np.stack([b0, b1, b2, b3], axis=-1)
     elif key == "frf_B_reduced":
@@ -338,12 +340,12 @@ class DataKerrSchild(DataSph):
       # bnorm = np.sqrt(inner_product_4d_contravariant(self.frf_B, self.frf_B, self._rv, self._thetav, self.a))
       # self.__dict__[key] = self.frf_B / bnorm[..., np.newaxis]
       b_upper = self.frf_B / bnorm[..., np.newaxis]
-      b_upper = replace_nan_with_zero(b_upper)
+      b_upper = replace_naninf_with_zero(b_upper)
       self.__dict__[key] = b_upper
     elif key == "fluid_b_upper_reduced":
       bnorm = np.sqrt(np.einsum("ijab,ija,ijb->ij", self.g_lower_reduced, self.frf_B_reduced, self.frf_B_reduced))
       b_upper_reduced = self.frf_B_reduced / bnorm[..., np.newaxis]
-      b_upper_reduced = replace_nan_with_zero(b_upper_reduced)
+      b_upper_reduced = replace_naninf_with_zero(b_upper_reduced)
       self.__dict__[key] = b_upper_reduced
     elif key == "stress_e":
       stress_e = np.zeros((self.x1.shape[0], self.x1.shape[1], 4, 4))
