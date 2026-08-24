@@ -19,8 +19,11 @@ def alpha(r,th,a):
   return 1.0/np.sqrt(1.0+2.0*r/Sigma(r,th,a))
 def beta1u(r,th,a):
   return 2.0*r/(Sigma(r,th,a)+2.0*r)
+def gmsqrt_tilde(r,th,a):  # gmsqrt with problematic sin(theta) divided out
+  return Sigma(r,th,a)*np.sqrt(1.0+2.0*r/Sigma(r,th,a))
 def gmsqrt(r,th,a):
-  return Sigma(r,th,a)*np.sin(th)*np.sqrt(1.0+2.0*r/Sigma(r,th,a))
+  return gmsqrt_tilde(r,th,a)*np.sin(th)
+  # return Sigma(r,th,a)*np.sin(th)*np.sqrt(1.0+2.0*r/Sigma(r,th,a))
 def gsqrt(r,th,a):
   return Sigma(r,th,a)*np.sin(th)
 def beta1d(r,th,a):
