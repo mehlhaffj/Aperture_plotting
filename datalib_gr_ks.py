@@ -665,6 +665,7 @@ def lower_4d_vec(v, r, th, a):
   l3 = g13 * v[...,1] + g33 * v[...,3] + g03 * v[...,0]
   return np.stack([l0, l1, l2, l3], axis=-1)
 
+
 # Calculate T^mu_nu for the electromagnetic field
 def calc_Tmunu_em(data):
     Dru  = data.E1

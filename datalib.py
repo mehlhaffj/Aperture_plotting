@@ -78,94 +78,62 @@ class Data:
     # reload configuration file
     self._conf = self.load_conf(os.path.join(self._path, "config.toml"))
     self._load_mesh()
-    self.load_fld_keys(0,print_keys)
-    self.load_ptc_keys(0,print_keys)
-    # subsequent commented out lines are moved to load_fld_keys and load_ptc_keys
-    # num_re = re.compile(r"\d+")
-    # generate a list of output steps for fields
-    # self._fld_keys = []
-    # self.fld_steps = [
-    #   int(num_re.findall(f.stem)[0]) for f in Path(self._path).glob("fld.*.h5")
-    # ]
-    # if len(self.fld_steps) > 0:
-    #   self.fld_steps.sort()
-    #   self._current_fld_step = self.fld_steps[0]
-    #   f_fld = h5py.File(
-    #     os.path.join(self._path, f"fld.{self._current_fld_step:05d}.h5"),
-    #     "r",
-    #   )
-    #   self._original_fld_keys = list(f_fld.keys())
-    #   self._fld_keys = list(f_fld.keys())
-    #   for k in extra_fld_keys:
-    #     if k not in self._original_fld_keys:
-    #       self._fld_keys.append(k)
-    #   if print_keys:
-    #     print("fld keys are:", self._fld_keys)
-    #   f_fld.close()
+    self.gather_fld_steps()
+    self.gather_ptc_steps()
+    self.load_fld_keys(self.fld_steps[0],print_keys)
+    self.load_ptc_keys(self.ptc_steps[0],print_keys)
 
-    # generate a list of output steps for particles
-    # self._ptc_keys = []
-    # self.ptc_steps = [
-    #   int(num_re.findall(f.stem)[0]) for f in Path(self._path).glob("ptc.*.h5")
-    # ]
-    # if len(self.ptc_steps) > 0:
-    #   self.ptc_steps.sort()
-    #   self._current_ptc_step = self.ptc_steps[-1]
-    #   f_ptc = h5py.File(
-    #     os.path.join(self._path, f"ptc.{self._current_ptc_step:05d}.h5"),
-    #     "r",
-    #   )
-    #   self._ptc_keys = list(f_ptc.keys())
-    #   if print_keys:
-    #     print("ptc keys are:", self._ptc_keys)
-    #   f_ptc.close()
-  
-  def load_ptc_keys(self,step,print_keys=False):
-    '''
-    Load the keys of the particle file at a given step
-    '''
+  def gather_fld_steps(self):
     num_re = re.compile(r"\d+")
-
-    self._ptc_keys = []
-    self.ptc_steps = [
-      int(num_re.findall(f.stem)[0]) for f in Path(self._path).glob("ptc.*.h5")
-    ] # Looks through the directory and finds all the ptc files
-    if len(self.ptc_steps) > 0:
-      self.ptc_steps.sort()
-      self._current_ptc_step = self.ptc_steps[step]
-      f_ptc = h5py.File(
-        os.path.join(self._path, f"ptc.{self._current_ptc_step:05d}.h5"),
-        "r",
-      )#Finds existing keys in the file at the given step
-      self._ptc_keys = list(f_ptc.keys())
-      if print_keys:
-        print("ptc keys are:", self._ptc_keys)
-      f_ptc.close()
-  
-  def load_fld_keys(self,step,print_keys=False):
-    '''
-    Load the keys of the field file at a given step
-    '''
-    num_re = re.compile(r"\d+")
-    self._fld_keys = []
     self.fld_steps = [
       int(num_re.findall(f.stem)[0]) for f in Path(self._path).glob("fld.*.h5")
     ]
     if len(self.fld_steps) > 0:
       self.fld_steps.sort()
-      self._current_fld_step = self.fld_steps[step]
-      f_fld = h5py.File(
-        os.path.join(self._path, f"fld.{self._current_fld_step:05d}.h5"),
-        "r",
-      )
-      self._original_fld_keys = list(f_fld.keys())
-      self._fld_keys = list(f_fld.keys())
-      for k in self.extra_fld_keys:
-        if k not in self._original_fld_keys:
-          self._fld_keys.append(k)
-      if print_keys:
-        print("fld keys are:", self._fld_keys)
-      f_fld.close()
+    return self.fld_steps
+
+  def gather_ptc_steps(self):
+    num_re = re.compile(r"\d+")
+    self.ptc_steps = [
+      int(num_re.findall(f.stem)[0]) for f in Path(self._path).glob("ptc.*.h5")
+    ]
+    if len(self.ptc_steps) > 0:
+      self.ptc_steps.sort()
+    return self.ptc_steps
+  
+  def load_ptc_keys(self,step,print_keys=False):
+    '''
+    Load the keys of the particle file at a given step
+    '''
+    self._ptc_keys = []
+    self._current_ptc_step = step
+    f_ptc = h5py.File(
+      os.path.join(self._path, f"ptc.{self._current_ptc_step:05d}.h5"),
+      "r",
+    )#Finds existing keys in the file at the given step
+    self._ptc_keys = list(f_ptc.keys())
+    if print_keys:
+      print("ptc keys are:", self._ptc_keys)
+    f_ptc.close()
+  
+  def load_fld_keys(self,step,print_keys=False):
+    '''
+    Load the keys of the field file at a given step
+    '''
+    self._fld_keys = []
+    self._current_fld_step = step
+    f_fld = h5py.File(
+      os.path.join(self._path, f"fld.{self._current_fld_step:05d}.h5"),
+      "r",
+    )
+    self._original_fld_keys = list(f_fld.keys())
+    self._fld_keys = list(f_fld.keys())
+    for k in self.extra_fld_keys:
+      if k not in self._original_fld_keys:
+        self._fld_keys.append(k)
+    if print_keys:
+      print("fld keys are:", self._fld_keys)
+    f_fld.close()
   
   def _load_mesh(self):
     # print("Base")
